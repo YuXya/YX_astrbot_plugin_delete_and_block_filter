@@ -1,0 +1,56 @@
+{
+    "enable_delete_filter": {
+        "type": "bool",
+        "description": "【词语删除功能】总开关",
+        "hint": "是否启用此功能来删除消息中的指定词语。",
+        "default": false
+    },
+    "delete_words_list": {
+        "type": "list",
+        "description": "【词语删除功能】要删除的词语列表",
+        "hint": "每输入一个词语后按回车键即可添加。",
+        "default": []
+    },
+    "delete_case_sensitive": {
+        "type": "bool",
+        "description": "【词语删除功能】区分大小写",
+        "hint": "开启后，删除词语时会区分英文字母的大小写 (例如，勾选后屏蔽 'bad' 不会影响 'Bad')。",
+        "default": false
+    },
+    "delete_match_whole_word": {
+        "type": "bool",
+        "description": "【词语删除功能】仅匹配整个单词",
+        "hint": "开启后，仅当词语作为独立单词出现时才删除 (例如，勾选后屏蔽 'is' 不会影响 'this')。对于中文单字，建议关闭此选项。",
+        "default": true
+    },
+    "enable_block_filter": {
+        "type": "bool",
+        "description": "【消息拦截功能】总开关",
+        "hint": "是否启用此功能来拦截包含指定词语的消息。",
+        "default": false
+    },
+    "block_words_list": {
+        "type": "list",
+        "description": "【消息拦截功能】触发拦截的词语列表",
+        "hint": "每输入一个词语后按回车键即可添加。",
+        "default": []
+    },
+    "block_case_sensitive": {
+        "type": "bool",
+        "description": "【消息拦截功能】区分大小写",
+        "hint": "开启后，判断拦截词时会区分英文字母的大小写。",
+        "default": false
+    },
+    "block_match_whole_word": {
+        "type": "bool",
+        "description": "【消息拦截功能】仅匹配整个单词",
+        "hint": "开启后，仅当词语作为独立单词出现时才触发拦截。对于中文单字，建议关闭此选项。",
+        "default": true
+    },
+    "block_response_message": {
+        "type": "string",
+        "description": "【消息拦截功能】自定义拦截回复",
+        "hint": "当消息被拦截时，机器人将回复此处设置的文本。如果留空，则不回复任何内容。",
+        "default": ""
+    }
+}
