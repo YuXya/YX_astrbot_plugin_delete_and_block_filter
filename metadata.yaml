@@ -1,6 +1,6 @@
 name: delete_and_block_filter # 这是你的插件的唯一识别名。
-desc: 词语删除与拦截器。可管理LLM回复的屏蔽词。输入 /filter 查看当前配置。 # 插件简短描述
-help: 输入 /filter 查看关键词回复帮助。 # 插件的帮助信息
+desc: 词语删除与拦截器。可管理LLM回复的屏蔽词。输入 /过滤配置 查看当前配置。 # 插件简短描述
+help: 输入 /过滤配置 查看关键词回复帮助。 # 插件的帮助信息
 version: v1.4.0 # 插件版本号
 author: Enixi # 作者
-repo: https://github.com/enixi/astrbot_plugin_error_filter # 插件的仓库地址
+repo: https://github.com/enixi/delete_and_block_filter # 插件的仓库地址
