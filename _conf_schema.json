@@ -1,56 +1,122 @@
 {
-    "enable_delete_filter": {
+    "show_console_log": {
         "type": "bool",
-        "description": "【词语删除功能】总开关",
-        "hint": "是否启用此功能来删除消息中的指定词语。",
+        "description": "🔧 显示控制台详细日志",
+        "hint": "开启后，过滤器触发时会在控制台显示详细的过滤日志，包括原文、触发词和处理结果。",
+        "default": true
+    },
+    "enable_llm_filter": {
+        "type": "bool",
+        "description": "🤖 启用LLM回复过滤器",
+        "hint": "开启后，可以对AI的回复进行删除或拦截处理。",
         "default": false
     },
-    "delete_words_list": {
+    "llm_delete_words": {
         "type": "list",
-        "description": "【词语删除功能】要删除的词语列表",
-        "hint": "每输入一个词语后按回车键即可添加。",
-        "default": []
+        "description": "🗑️ LLM删除词列表",
+        "hint": "这些词语将从AI回复中被删除（保留其他内容）。",
+        "default": [],
+        "items": {
+            "type": "string"
+        }
     },
-    "delete_case_sensitive": {
+    "llm_delete_case_sensitive": {
         "type": "bool",
-        "description": "【词语删除功能】区分大小写",
+        "description": "🔤 LLM删除词是否区分大小写",
         "hint": "开启后，删除词语时会区分英文字母的大小写 (例如，勾选后屏蔽 'bad' 不会影响 'Bad')。",
         "default": false
     },
-    "delete_match_whole_word": {
+    "llm_delete_match_whole_word": {
         "type": "bool",
-        "description": "【词语删除功能】仅匹配整个单词",
-        "hint": "开启后，仅当词语作为独立单词出现时才删除 (例如，勾选后屏蔽 'is' 不会影响 'this')。对于中文单字，建议关闭此选项。",
-        "default": true
-    },
-    "enable_block_filter": {
-        "type": "bool",
-        "description": "【消息拦截功能】总开关",
-        "hint": "是否启用此功能来拦截包含指定词语的消息。",
+        "description": "🎯 LLM删除词是否仅匹配整个单词",
+        "hint": "开启后，仅当词语作为独立单词出现时才删除 (例如，勾选后屏蔽 'is' 不会影响 'this')。对于中文处理，建议保持关闭状态。",
         "default": false
     },
-    "block_words_list": {
+    "llm_block_words": {
         "type": "list",
-        "description": "【消息拦截功能】触发拦截的词语列表",
-        "hint": "每输入一个词语后按回车键即可添加。",
-        "default": []
+        "description": "🚫 LLM拦截词列表",
+        "hint": "如果AI回复包含这些词语，整个回复将被替换或清空。",
+        "default": [],
+        "items": {
+            "type": "string"
+        }
     },
-    "block_case_sensitive": {
+    "llm_block_case_sensitive": {
         "type": "bool",
-        "description": "【消息拦截功能】区分大小写",
+        "description": "🔤 LLM拦截词是否区分大小写",
         "hint": "开启后，判断拦截词时会区分英文字母的大小写。",
         "default": false
     },
-    "block_match_whole_word": {
+    "llm_block_match_whole_word": {
         "type": "bool",
-        "description": "【消息拦截功能】仅匹配整个单词",
-        "hint": "开启后，仅当词语作为独立单词出现时才触发拦截。对于中文单字，建议关闭此选项。",
-        "default": true
+        "description": "🎯 LLM拦截词是否仅匹配整个单词",
+        "hint": "开启后，仅当词语作为独立单词出现时才触发拦截。对于中文处理，建议保持关闭状态。",
+        "default": false
     },
-    "block_response_message": {
+    "llm_block_response": {
         "type": "string",
-        "description": "【消息拦截功能】自定义拦截回复",
-        "hint": "当消息被拦截时，机器人将回复此处设置的文本。如果留空，则不回复任何内容。",
+        "description": "💬 LLM拦截后的回复内容",
+        "hint": "当AI回复被拦截时显示的内容。留空则直接清空回复。",
+        "default": ""
+    },
+    "_separator_1": {
+        "type": "string",
+        "description": "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "hint": "以上为LLM回复过滤器配置，以下为最终输出过滤器配置",
+        "default": ""
+    },
+    "enable_final_filter": {
+        "type": "bool",
+        "description": "🛡️ 启用最终输出过滤器",
+        "hint": "开启后，可以过滤AstrBot发送给用户的所有消息，包括错误提示。",
+        "default": false
+    },
+    "final_delete_words": {
+        "type": "list",
+        "description": "🗑️ 最终输出删除词列表",
+        "hint": "这些词语将从最终消息中被删除（保留其他内容）。",
+        "default": [],
+        "items": {
+            "type": "string"
+        }
+    },
+    "final_delete_case_sensitive": {
+        "type": "bool",
+        "description": "🔤 最终输出删除词是否区分大小写",
+        "hint": "开启后，删除词语时会区分英文字母的大小写 (例如，勾选后屏蔽 'bad' 不会影响 'Bad')。",
+        "default": false
+    },
+    "final_delete_match_whole_word": {
+        "type": "bool",
+        "description": "🎯 最终输出删除词是否仅匹配整个单词",
+        "hint": "开启后，仅当词语作为独立单词出现时才删除 (例如，勾选后屏蔽 'is' 不会影响 'this')。对于中文处理，建议保持关闭状态。",
+        "default": false
+    },
+    "final_block_words": {
+        "type": "list",
+        "description": "🚫 最终输出拦截词列表",
+        "hint": "如果最终消息包含这些词语，整个消息将被替换或清空。建议添加'请求失败'来拦截错误消息。",
+        "default": [],
+        "items": {
+            "type": "string"
+        }
+    },
+    "final_block_case_sensitive": {
+        "type": "bool",
+        "description": "🔤 最终输出拦截词是否区分大小写",
+        "hint": "开启后，判断拦截词时会区分英文字母的大小写。",
+        "default": false
+    },
+    "final_block_match_whole_word": {
+        "type": "bool",
+        "description": "🎯 最终输出拦截词是否仅匹配整个单词",
+        "hint": "开启后，仅当词语作为独立单词出现时才触发拦截。对于中文处理，建议保持关闭状态。",
+        "default": false
+    },
+    "final_block_response": {
+        "type": "string",
+        "description": "💬 最终输出拦截后的回复内容",
+        "hint": "当最终消息被拦截时显示的内容。留空则对用户隐藏消息。",
         "default": ""
     }
 }

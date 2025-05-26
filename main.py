@@ -8,289 +8,561 @@ from astrbot.api import logger
 from astrbot.api.platform import AstrBotMessage
 from astrbot.api.message_components import Plain
 
-@register("delete_and_block_filter", "enixi", "词语删除与拦截器。可管理LLM回复的屏蔽词。输入 /过滤配置 查看当前配置。", "1.4.0")
+@register("astrbot_plugin_delete_and_block_filter", "enixi", "词语删除与拦截器。可管理LLM回复及Bot最终输出的屏蔽词。输入 /过滤配置 查看当前配置。", "2.0.0")
 class CustomWordFilter(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
-        self.plugin_id = "delete_and_block_filter"
+        self.plugin_id = "astrbot_plugin_delete_and_block_filter"
         self.config = config
-        self.config_file_path = os.path.join("data", "config", f"{self.plugin_id}_config.json")
 
-        logger.info(f"[{self.plugin_id}] Plugin loaded (v1.4.0).")
+        logger.info(f"[{self.plugin_id}] 插件已载入 (v2.0.0)")
         try:
-            self._reload_config_from_self_dot_config(is_init_load=True)
-        except Exception as e_init_reload:
-            logger.error(f"[{self.plugin_id}] ERROR during initial config load in __init__: {e_init_reload}", exc_info=True)
-
-    def _save_plugin_config(self):
-        try:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(self.config_file_path), exist_ok=True)
-            with open(self.config_file_path, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=4, ensure_ascii=False)
-            logger.info(f"[{self.plugin_id}] Configuration saved to {self.config_file_path}")
+            self._reload_config()
         except Exception as e:
-            logger.error(f"[{self.plugin_id}] Failed to save configuration: {e}", exc_info=True)
+            logger.error(f"[{self.plugin_id}] 配置加载失败: {e}", exc_info=True)
 
-    def _reload_config_from_self_dot_config(self, is_init_load: bool = False):
-        """Loads configuration from self.config into class attributes. Optionally logs status."""
+    def _save_config(self):
+        """保存配置"""
+        try:
+            self.config.save_config()
+            logger.info(f"[{self.plugin_id}] 配置已保存")
+        except Exception as e:
+            logger.error(f"[{self.plugin_id}] 保存配置失败: {e}", exc_info=True)
+
+    def _reload_config(self):
+        """加载配置到类属性"""
         
-        self.config.setdefault('enable_delete_filter', False)
-        self.config.setdefault('delete_words_list', [])
-        self.config.setdefault('delete_case_sensitive', False)
-        self.config.setdefault('delete_match_whole_word', True)
-        self.config.setdefault('enable_block_filter', False)
-        self.config.setdefault('block_words_list', [])
-        self.config.setdefault('block_case_sensitive', False)
-        self.config.setdefault('block_match_whole_word', True)
-        self.config.setdefault('block_response_message', '')
-
-        enable_delete_val = self.config.get('enable_delete_filter')
-        if isinstance(enable_delete_val, str):
-            self.enable_delete_filter = enable_delete_val.lower() == 'true'
-        elif isinstance(enable_delete_val, bool):
-            self.enable_delete_filter = enable_delete_val
-        else:
-            self.enable_delete_filter = False
-
-        self.delete_words_list = self.config.get('delete_words_list', [])
-        self.delete_case_sensitive = self.config.get('delete_case_sensitive', False)
-        self.delete_match_whole_word = self.config.get('delete_match_whole_word', True)
-
-        enable_block_val = self.config.get('enable_block_filter')
-        if isinstance(enable_block_val, str):
-            self.enable_block_filter = enable_block_val.lower() == 'true'
-        elif isinstance(enable_block_val, bool):
-            self.enable_block_filter = enable_block_val
-        else:
-            self.enable_block_filter = False
+        # 调试配置
+        self.config.setdefault('show_console_log', True)
         
-        self.block_words_list = self.config.get('block_words_list', [])
-        self.block_case_sensitive = self.config.get('block_case_sensitive', False)
-        self.block_match_whole_word = self.config.get('block_match_whole_word', True)
-        self.block_response_message = self.config.get('block_response_message', '')
+        # LLM回复过滤器配置
+        self.config.setdefault('enable_llm_filter', False)
+        self.config.setdefault('llm_delete_words', [])
+        self.config.setdefault('llm_delete_case_sensitive', False)
+        self.config.setdefault('llm_delete_match_whole_word', False)
+        self.config.setdefault('llm_block_words', [])
+        self.config.setdefault('llm_block_case_sensitive', False)
+        self.config.setdefault('llm_block_match_whole_word', False)
+        self.config.setdefault('llm_block_response', '')
 
-        if not is_init_load:
-            logger.info(f"Plugin [{self.plugin_id}] config reloaded by command.")
-            if self.enable_delete_filter:
-                logger.info(f"  - Delete filter: ENABLED. Words: {len(self.delete_words_list)}, WholeWord: {self.delete_match_whole_word}, CaseSensitive: {self.delete_case_sensitive}")
-            else: 
-                logger.info(f"  - Delete filter: DISABLED")
-            
-            if self.enable_block_filter:
-                block_action = f"Response: '{self.block_response_message}'" if self.block_response_message else "Action: [Clear Message]"
-                logger.info(f"  - Block filter: ENABLED. Words: {len(self.block_words_list)}, WholeWord: {self.block_match_whole_word}, CaseSensitive: {self.block_case_sensitive}, {block_action}")
-            else: 
-                logger.info(f"  - Block filter: DISABLED")
+        # 总输出过滤器配置
+        self.config.setdefault('enable_final_filter', False)
+        self.config.setdefault('final_delete_words', [])
+        self.config.setdefault('final_delete_case_sensitive', False)
+        self.config.setdefault('final_delete_match_whole_word', False)
+        self.config.setdefault('final_block_words', [])
+        self.config.setdefault('final_block_case_sensitive', False)
+        self.config.setdefault('final_block_match_whole_word', False)
+        self.config.setdefault('final_block_response', '')
 
-    def _build_regex(self, words: list, case_sensitive: bool, match_whole_word: bool) -> tuple[str, int]:
+        # 加载到实例变量
+        self.show_console_log = self.config.get('show_console_log', True)
+        
+        self.enable_llm_filter = self.config.get('enable_llm_filter', False)
+        self.llm_delete_words = self.config.get('llm_delete_words', [])
+        self.llm_delete_case_sensitive = self.config.get('llm_delete_case_sensitive', False)
+        self.llm_delete_match_whole_word = self.config.get('llm_delete_match_whole_word', False)
+        self.llm_block_words = self.config.get('llm_block_words', [])
+        self.llm_block_case_sensitive = self.config.get('llm_block_case_sensitive', False)
+        self.llm_block_match_whole_word = self.config.get('llm_block_match_whole_word', False)
+        self.llm_block_response = self.config.get('llm_block_response', '')
+
+        self.enable_final_filter = self.config.get('enable_final_filter', False)
+        self.final_delete_words = self.config.get('final_delete_words', [])
+        self.final_delete_case_sensitive = self.config.get('final_delete_case_sensitive', False)
+        self.final_delete_match_whole_word = self.config.get('final_delete_match_whole_word', False)
+        self.final_block_words = self.config.get('final_block_words', [])
+        self.final_block_case_sensitive = self.config.get('final_block_case_sensitive', False)
+        self.final_block_match_whole_word = self.config.get('final_block_match_whole_word', False)
+        self.final_block_response = self.config.get('final_block_response', '')
+
+        logger.info(f"[{self.plugin_id}] 配置已重载")
+
+    def _build_regex(self, words: list, case_sensitive: bool = False, match_whole_word: bool = False) -> str:
+        """构建正则表达式"""
         if not words:
-            return "", 0
-        processed_words = [re.escape(str(word)) for word in words] # Ensure words are strings
-        pattern = "|".join(processed_words)
-        if match_whole_word:
-            pattern = r"\b(?:" + pattern + r")\b"
+            return ""
         
-        flags = 0 if case_sensitive else re.IGNORECASE
-        return pattern, flags
+        # 过滤空词并转义特殊字符
+        processed_words = [re.escape(str(word).strip()) for word in words if str(word).strip()]
+        if not processed_words:
+            return ""
+        
+        # 如果需要匹配整个单词，添加单词边界
+        if match_whole_word:
+            processed_words = [r'\b' + word + r'\b' for word in processed_words]
+            
+        return "|".join(processed_words)
 
     @filter.on_llm_response()
     async def filter_llm_response(self, event: AstrMessageEvent, response: LLMResponse):
-        if response is None or not hasattr(response, 'completion_text') or response.completion_text is None:
+        """过滤LLM回复"""
+        if not self.enable_llm_filter or not response or not hasattr(response, 'completion_text') or not response.completion_text:
             return
 
-        original_text = response.completion_text
+        original_text = str(response.completion_text)
         modified_text = original_text
-        action_taken = False
-
-        if self.enable_block_filter and self.block_words_list:
-            block_pattern, block_flags = self._build_regex(self.block_words_list, self.block_case_sensitive, self.block_match_whole_word)
-            if block_pattern:
-                try:
-                    if re.search(block_pattern, modified_text, block_flags):
-                        action_taken = True
-                        original_before_block = modified_text
-                        if self.block_response_message:
-                            modified_text = self.block_response_message
-                            logger.info(f"[{self.plugin_id}] Blocked: Text replaced. Original: '{original_before_block}' -> New: '{modified_text}'")
-                        else:
-                            modified_text = ""
-                            logger.info(f"[{self.plugin_id}] Blocked: Text cleared. Original: '{original_before_block}'")
-                        response.completion_text = modified_text
-                        return 
-                except re.error as e: 
-                    logger.error(f"[{self.plugin_id}] Block regex error for pattern '{block_pattern}': {e}", exc_info=True)
-
-        if self.enable_delete_filter and self.delete_words_list:
-            delete_pattern, delete_flags = self._build_regex(self.delete_words_list, self.delete_case_sensitive, self.delete_match_whole_word)
-            if delete_pattern:
-                try:
-                    text_before_delete = modified_text
-                    modified_text = re.sub(delete_pattern, "", text_before_delete, flags=delete_flags)
-                    if modified_text != text_before_delete:
-                        action_taken = True
-                        logger.info(f"[{self.plugin_id}] Deleted: Text modified. Before: '{text_before_delete}' -> After: '{modified_text}'")
-                except re.error as e: 
-                    logger.error(f"[{self.plugin_id}] Delete regex error for pattern '{delete_pattern}': {e}", exc_info=True)
+        triggered_actions = []  # 记录触发的操作
         
-        if action_taken:
-            response.completion_text = modified_text
+        # 拦截功能（优先）
+        if self.llm_block_words:
+            pattern = self._build_regex(self.llm_block_words, self.llm_block_case_sensitive, self.llm_block_match_whole_word)
+            flags = 0 if self.llm_block_case_sensitive else re.IGNORECASE
+            if pattern and re.search(pattern, modified_text, flags):
+                # 找出具体触发的词
+                triggered_words = [word for word in self.llm_block_words 
+                                 if re.search(re.escape(word), modified_text, flags)]
+                
+                if self.llm_block_response:
+                    modified_text = self.llm_block_response
+                    triggered_actions.append(f"拦截并替换(触发词: {triggered_words}) -> '{self.llm_block_response}'")
+                else:
+                    modified_text = ""
+                    triggered_actions.append(f"拦截并清空(触发词: {triggered_words})")
+                
+                response.completion_text = modified_text
+                
+                # 输出合并的日志
+                if self.show_console_log and triggered_actions:
+                    logger.info(f"[{self.plugin_id}] LLM过滤结果: {' | '.join(triggered_actions)}")
+                    
+                    # 确保原文显示正常 - 一定会执行
+                    logger.info(f"[{self.plugin_id}] 原文: '{original_text}'")
+                
+                return
 
-    # --- Chat Command Handlers ---
+        # 删除功能
+        if self.llm_delete_words:
+            pattern = self._build_regex(self.llm_delete_words, self.llm_delete_case_sensitive, self.llm_delete_match_whole_word)
+            flags = 0 if self.llm_delete_case_sensitive else re.IGNORECASE
+            if pattern:
+                new_text = re.sub(pattern, "", modified_text, flags=flags)
+                if new_text != modified_text:
+                    # 找出具体删除的词
+                    triggered_words = [word for word in self.llm_delete_words 
+                                     if re.search(re.escape(word), modified_text, flags)]
+                    triggered_actions.append(f"删除敏感词(触发词: {triggered_words})")
+                    response.completion_text = new_text
+                    modified_text = new_text  # 更新修改后的文本
+        
+        # 输出合并的日志（只在有操作时输出）
+        if self.show_console_log and triggered_actions:
+            logger.info(f"[{self.plugin_id}] LLM过滤结果: {' | '.join(triggered_actions)}")
+            # 原文显示 - 简化处理确保一定执行
+            logger.info(f"[{self.plugin_id}] 原文: '{original_text}'")
+            # 如果有修改才显示结果
+            if modified_text != original_text:
+                logger.info(f"[{self.plugin_id}] 结果: '{modified_text}'")
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("加删除词")
-    async def cmd_add_delete_word(self, event: AstrMessageEvent, *, item: str):
-        """[Admin] 添加一个词到删除列表。用法: /加删除词 <要删除的词或符号>"""
-        if not event.is_admin():
-            yield event.plain_result("抱歉，您没有权限使用此命令。")
+    def _get_text_from_result(self, result: MessageEventResult) -> str:
+        """从MessageEventResult提取文本"""
+        if not result or not hasattr(result, 'chain') or not result.chain:
+            return ""
+        
+        text_parts = []
+        for component in result.chain:
+            if isinstance(component, Plain):
+                text_parts.append(str(component.text))
+        
+        return "".join(text_parts)
+
+    @filter.on_decorating_result()
+    async def filter_final_output(self, event: AstrMessageEvent):
+        """过滤AstrBot最终输出（包括错误消息）"""
+        if not self.enable_final_filter:
             return
-        if not item:
-            yield event.plain_result("请提供要添加的词语/符号。用法: /加删除词 <内容>")
+
+        result = event.get_result()
+        if not result or not hasattr(result, 'chain') or not result.chain:
+            return
+
+        original_text = self._get_text_from_result(result)
+        if not original_text:
+            return
+
+        triggered_actions = []  # 记录触发的操作
+
+        # 拦截功能（优先）
+        if self.final_block_words:
+            pattern = self._build_regex(self.final_block_words, self.final_block_case_sensitive, self.final_block_match_whole_word)
+            flags = 0 if self.final_block_case_sensitive else re.IGNORECASE
+            if pattern and re.search(pattern, original_text, flags):
+                # 找出具体触发的词
+                triggered_words = [word for word in self.final_block_words 
+                                 if re.search(re.escape(word), original_text, flags)]
+                
+                if self.final_block_response:
+                    # 替换为自定义回复
+                    result.chain = [Plain(self.final_block_response)]
+                    triggered_actions.append(f"拦截并替换(触发词: {triggered_words}) -> '{self.final_block_response}'")
+                else:
+                    # 完全隐藏消息
+                    event.stop_event()  # 阻止事件继续传播
+                    event.set_result(None)  # 清除结果
+                    triggered_actions.append(f"拦截并完全隐藏(触发词: {triggered_words})")
+                
+                # 输出合并的日志
+                if self.show_console_log and triggered_actions:
+                    logger.info(f"[{self.plugin_id}] 最终输出过滤结果: {' | '.join(triggered_actions)}")
+                    # 确保原文显示正常
+                    logger.info(f"[{self.plugin_id}] 原文: '{original_text}'")
+                
+                return
+
+        # 删除功能
+        if self.final_delete_words:
+            pattern = self._build_regex(self.final_delete_words, self.final_delete_case_sensitive, self.final_delete_match_whole_word)
+            flags = 0 if self.final_delete_case_sensitive else re.IGNORECASE
+            if pattern:
+                new_chain = []
+                text_changed = False
+                
+                for component in result.chain:
+                    if isinstance(component, Plain):
+                        original_component_text = str(component.text)
+                        modified_component_text = re.sub(pattern, "", original_component_text, flags=flags)
+                        
+                        if modified_component_text != original_component_text:
+                            text_changed = True
+                        
+                        if modified_component_text.strip():
+                            new_chain.append(Plain(modified_component_text))
+                    else:
+                        new_chain.append(component)
+                
+                if text_changed:
+                    # 找出具体删除的词
+                    triggered_words = [word for word in self.final_delete_words 
+                                     if re.search(re.escape(word), original_text, flags)]
+                    triggered_actions.append(f"删除敏感词(触发词: {triggered_words})")
+                    result.chain = new_chain
+        
+        # 输出合并的日志（只在有操作时输出）
+        if self.show_console_log and triggered_actions:
+            final_text = self._get_text_from_result(result)
+            logger.info(f"[{self.plugin_id}] 最终输出过滤结果: {' | '.join(triggered_actions)}")
+            # 确保原文显示正常
+            logger.info(f"[{self.plugin_id}] 原文: '{original_text}'")
+            
+            if final_text != original_text:
+                logger.info(f"[{self.plugin_id}] 结果: '{final_text}'")
+
+    # === 配置命令 ===
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("过滤配置")
+    async def cmd_show_config(self, event: AstrMessageEvent):
+        """显示过滤器配置"""
+        if not event.is_admin(): 
+            yield event.plain_result("抱歉，您没有权限。")
             return
         
-        current_list = self.config.get('delete_words_list', [])
-        if item not in current_list:
-            current_list.append(item)
-            self.config['delete_words_list'] = current_list
-            self._save_plugin_config()
-            self._reload_config_from_self_dot_config()
-            yield event.plain_result(f"已添加 '{item}' 到删除列表。")
-        else:
-            yield event.plain_result(f"'{item}' 已经在删除列表里了。")
+        self._reload_config()
+        
+        llm_status = "开启" if self.enable_llm_filter else "关闭"
+        final_status = "开启" if self.enable_final_filter else "关闭"
+        
+        config_text = f"""=== 过滤器配置 ({self.plugin_id} v2.0.0) ===
+
+🔧 调试设置:
+  • 控制台详细日志: {'开启' if self.show_console_log else '关闭'}
+
+🤖 LLM回复过滤器: {llm_status}
+  • 删除词: {self.llm_delete_words if self.llm_delete_words else '无'}
+    - 区分大小写: {'是' if self.llm_delete_case_sensitive else '否'}
+    - 完全匹配: {'是' if self.llm_delete_match_whole_word else '否 (推荐)'}
+  • 拦截词: {self.llm_block_words if self.llm_block_words else '无'}
+    - 区分大小写: {'是' if self.llm_block_case_sensitive else '否'}
+    - 完全匹配: {'是' if self.llm_block_match_whole_word else '否 (推荐)'}
+  • 拦截回复: {f"'{self.llm_block_response}'" if self.llm_block_response else '留空(直接清空)'}
+
+🛡️ 最终输出过滤器: {final_status}
+  • 删除词: {self.final_delete_words if self.final_delete_words else '无'}
+    - 区分大小写: {'是' if self.final_delete_case_sensitive else '否'}
+    - 完全匹配: {'是' if self.final_delete_match_whole_word else '否 (推荐)'}
+  • 拦截词: {self.final_block_words if self.final_block_words else '无'}
+    - 区分大小写: {'是' if self.final_block_case_sensitive else '否'}
+    - 完全匹配: {'是' if self.final_block_match_whole_word else '否 (推荐)'}
+  • 拦截回复: {f"'{self.final_block_response}'" if self.final_block_response else '留空(直接隐藏)'}
+
+=== 🚀 一键设置（推荐） ===
+发送: /一键设置错误过滤
+
+=== 📝 手动设置错误消息过滤 ===
+1. /开启总输出过滤
+2. /加总输出拦截词 请求失败
+3. /加总输出拦截词 错误类型  
+4. /加总输出拦截词 错误信息
+
+=== 所有管理命令 ===
+开关控制:
+  /开启LLM过滤   /关闭LLM过滤
+  /开启总输出过滤 /关闭总输出过滤
+  /开启控制台日志 /关闭控制台日志
+
+LLM回复管理:
+  /加LLM删除词 <词语>  /减LLM删除词 <词语>
+  /加LLM拦截词 <词语>  /减LLM拦截词 <词语>
+  /设置LLM拦截回复 <内容>
+
+最终输出管理:
+  /加总输出删除词 <词语>  /减总输出删除词 <词语>
+  /加总输出拦截词 <词语>  /减总输出拦截词 <词语>
+  /设置总输出拦截回复 <内容>
+
+💡 高级配置请在网页管理界面调整区分大小写和完全匹配选项"""
+
+        yield event.plain_result(config_text)
+
+    # === 开关控制 ===
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("开启LLM过滤")
+    async def cmd_enable_llm_filter(self, event: AstrMessageEvent):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        self.config['enable_llm_filter'] = True
+        self._save_config()
+        self._reload_config()
+        yield event.plain_result("✅ LLM回复过滤器已开启")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("减删除词")
-    async def cmd_remove_delete_word(self, event: AstrMessageEvent, *, item: str):
-        """[Admin] 从删除列表移除一个词。用法: /减删除词 <要移除的词或符号>"""
-        if not event.is_admin():
-            yield event.plain_result("抱歉，您没有权限使用此命令。")
-            return
-        if not item:
-            yield event.plain_result("请提供要移除的词语/符号。用法: /减删除词 <内容>")
-            return
-
-        current_list = self.config.get('delete_words_list', [])
-        if item in current_list:
-            current_list.remove(item)
-            self.config['delete_words_list'] = current_list
-            self._save_plugin_config()
-            self._reload_config_from_self_dot_config()
-            yield event.plain_result(f"已从删除列表移除 '{item}'。")
-        else:
-            yield event.plain_result(f"'{item}' 不在删除列表里。")
+    @filter.command("关闭LLM过滤")
+    async def cmd_disable_llm_filter(self, event: AstrMessageEvent):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        self.config['enable_llm_filter'] = False
+        self._save_config()
+        self._reload_config()
+        yield event.plain_result("❌ LLM回复过滤器已关闭")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("加拦截词")
-    async def cmd_add_block_word(self, event: AstrMessageEvent, *, item: str):
-        """[Admin] 添加一个词到拦截列表。用法: /加拦截词 <要拦截的词或符号>"""
-        if not event.is_admin():
-            yield event.plain_result("抱歉，您没有权限使用此命令。")
-            return
-        if not item:
-            yield event.plain_result("请提供要添加到拦截列表的词语/符号。用法: /加拦截词 <内容>")
-            return
-
-        current_list = self.config.get('block_words_list', [])
-        if item not in current_list:
-            current_list.append(item)
-            self.config['block_words_list'] = current_list
-            self._save_plugin_config()
-            self._reload_config_from_self_dot_config()
-            yield event.plain_result(f"已添加 '{item}' 到拦截列表。")
-        else:
-            yield event.plain_result(f"'{item}' 已经在拦截列表里了。")
+    @filter.command("开启总输出过滤")
+    async def cmd_enable_final_filter(self, event: AstrMessageEvent):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        self.config['enable_final_filter'] = True
+        self._save_config()
+        self._reload_config()
+        yield event.plain_result("✅ 最终输出过滤器已开启")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("减拦截词")
-    async def cmd_remove_block_word(self, event: AstrMessageEvent, *, item: str):
-        """[Admin] 从拦截列表移除一个词。用法: /减拦截词 <要移除的词或符号>"""
-        if not event.is_admin():
-            yield event.plain_result("抱歉，您没有权限使用此命令。")
-            return
-        if not item:
-            yield event.plain_result("请提供要从拦截列表移除的词语/符号。用法: /减拦截词 <内容>")
-            return
-
-        current_list = self.config.get('block_words_list', [])
-        if item in current_list:
-            current_list.remove(item)
-            self.config['block_words_list'] = current_list
-            self._save_plugin_config()
-            self._reload_config_from_self_dot_config()
-            yield event.plain_result(f"已从拦截列表移除 '{item}'。")
-        else:
-            yield event.plain_result(f"'{item}' 不在拦截列表里。")
+    @filter.command("关闭总输出过滤")
+    async def cmd_disable_final_filter(self, event: AstrMessageEvent):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        self.config['enable_final_filter'] = False
+        self._save_config()
+        self._reload_config()
+        yield event.plain_result("❌ 最终输出过滤器已关闭")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("切换删除")
-    async def cmd_toggle_delete_filter(self, event: AstrMessageEvent):
-        """[Admin] 开/关词语删除功能。"""
-        if not event.is_admin():
-            yield event.plain_result("抱歉，您没有权限使用此命令。")
-            return
-        current_status = self.config.get('enable_delete_filter', False)
-        new_status = not current_status
-        self.config['enable_delete_filter'] = new_status
-        self._save_plugin_config()
-        self._reload_config_from_self_dot_config()
-        yield event.plain_result(f"词语删除功能已 {'开启' if new_status else '关闭'}。")
+    @filter.command("开启控制台日志")
+    async def cmd_enable_console_log(self, event: AstrMessageEvent):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        self.config['show_console_log'] = True
+        self._save_config()
+        self._reload_config()
+        yield event.plain_result("✅ 控制台详细日志已开启")
 
-    @filter.command("切换拦截")
-    async def cmd_toggle_block_filter(self, event: AstrMessageEvent):
-        """[Admin] 开/关消息拦截功能。"""
-        if not event.is_admin():
-            yield event.plain_result("抱歉，您没有权限使用此命令。")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("关闭控制台日志")
+    async def cmd_disable_console_log(self, event: AstrMessageEvent):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        self.config['show_console_log'] = False
+        self._save_config()
+        self._reload_config()
+        yield event.plain_result("❌ 控制台详细日志已关闭")
+
+    # === LLM回复管理 ===
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("加LLM删除词")
+    async def cmd_add_llm_delete_word(self, event: AstrMessageEvent, *, word: str):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        if not word: yield event.plain_result("请提供要添加的词语"); return
+        
+        words = self.config.get('llm_delete_words', [])
+        if word not in words:
+            words.append(word)
+            self.config['llm_delete_words'] = words
+            self._save_config()
+            self._reload_config()
+            yield event.plain_result(f"✅ 已添加LLM删除词: '{word}'")
+        else:
+            yield event.plain_result(f"❗ '{word}' 已在LLM删除词列表中")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("减LLM删除词")
+    async def cmd_remove_llm_delete_word(self, event: AstrMessageEvent, *, word: str):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        if not word: yield event.plain_result("请提供要移除的词语"); return
+        
+        words = self.config.get('llm_delete_words', [])
+        if word in words:
+            words.remove(word)
+            self.config['llm_delete_words'] = words
+            self._save_config()
+            self._reload_config()
+            yield event.plain_result(f"✅ 已移除LLM删除词: '{word}'")
+        else:
+            yield event.plain_result(f"❗ '{word}' 不在LLM删除词列表中")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("加LLM拦截词")
+    async def cmd_add_llm_block_word(self, event: AstrMessageEvent, *, word: str):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        if not word: yield event.plain_result("请提供要添加的词语"); return
+        
+        words = self.config.get('llm_block_words', [])
+        if word not in words:
+            words.append(word)
+            self.config['llm_block_words'] = words
+            self._save_config()
+            self._reload_config()
+            yield event.plain_result(f"✅ 已添加LLM拦截词: '{word}'")
+        else:
+            yield event.plain_result(f"❗ '{word}' 已在LLM拦截词列表中")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("减LLM拦截词")
+    async def cmd_remove_llm_block_word(self, event: AstrMessageEvent, *, word: str):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        if not word: yield event.plain_result("请提供要移除的词语"); return
+        
+        words = self.config.get('llm_block_words', [])
+        if word in words:
+            words.remove(word)
+            self.config['llm_block_words'] = words
+            self._save_config()
+            self._reload_config()
+            yield event.plain_result(f"✅ 已移除LLM拦截词: '{word}'")
+        else:
+            yield event.plain_result(f"❗ '{word}' 不在LLM拦截词列表中")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("设置LLM拦截回复")
+    async def cmd_set_llm_block_response(self, event: AstrMessageEvent, *, response: str = ""):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        
+        self.config['llm_block_response'] = response
+        self._save_config()
+        self._reload_config()
+        
+        if response:
+            yield event.plain_result(f"✅ LLM拦截回复已设置为: '{response}'")
+        else:
+            yield event.plain_result("✅ LLM拦截回复已清空（将直接清空消息）")
+
+    # === 最终输出管理 ===
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("加总输出删除词")
+    async def cmd_add_final_delete_word(self, event: AstrMessageEvent, *, word: str):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        if not word: yield event.plain_result("请提供要添加的词语"); return
+        
+        words = self.config.get('final_delete_words', [])
+        if word not in words:
+            words.append(word)
+            self.config['final_delete_words'] = words
+            self._save_config()
+            self._reload_config()
+            yield event.plain_result(f"✅ 已添加总输出删除词: '{word}'")
+        else:
+            yield event.plain_result(f"❗ '{word}' 已在总输出删除词列表中")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("减总输出删除词")
+    async def cmd_remove_final_delete_word(self, event: AstrMessageEvent, *, word: str):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        if not word: yield event.plain_result("请提供要移除的词语"); return
+        
+        words = self.config.get('final_delete_words', [])
+        if word in words:
+            words.remove(word)
+            self.config['final_delete_words'] = words
+            self._save_config()
+            self._reload_config()
+            yield event.plain_result(f"✅ 已移除总输出删除词: '{word}'")
+        else:
+            yield event.plain_result(f"❗ '{word}' 不在总输出删除词列表中")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("加总输出拦截词")
+    async def cmd_add_final_block_word(self, event: AstrMessageEvent, *, word: str):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        if not word: yield event.plain_result("请提供要添加的词语"); return
+        
+        words = self.config.get('final_block_words', [])
+        if word not in words:
+            words.append(word)
+            self.config['final_block_words'] = words
+            self._save_config()
+            self._reload_config()
+            yield event.plain_result(f"✅ 已添加总输出拦截词: '{word}'")
+        else:
+            yield event.plain_result(f"❗ '{word}' 已在总输出拦截词列表中")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("减总输出拦截词")
+    async def cmd_remove_final_block_word(self, event: AstrMessageEvent, *, word: str):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        if not word: yield event.plain_result("请提供要移除的词语"); return
+        
+        words = self.config.get('final_block_words', [])
+        if word in words:
+            words.remove(word)
+            self.config['final_block_words'] = words
+            self._save_config()
+            self._reload_config()
+            yield event.plain_result(f"✅ 已移除总输出拦截词: '{word}'")
+        else:
+            yield event.plain_result(f"❗ '{word}' 不在总输出拦截词列表中")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("设置总输出拦截回复")
+    async def cmd_set_final_block_response(self, event: AstrMessageEvent, *, response: str = ""):
+        if not event.is_admin(): yield event.plain_result("抱歉，您没有权限。"); return
+        
+        self.config['final_block_response'] = response
+        self._save_config()
+        self._reload_config()
+        
+        if response:
+            yield event.plain_result(f"✅ 总输出拦截回复已设置为: '{response}'")
+        else:
+            yield event.plain_result("✅ 总输出拦截回复已清空（将直接清空消息）")
+
+    # === 快捷配置命令 ===
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("一键设置错误过滤")
+    async def cmd_quick_setup_error_filter(self, event: AstrMessageEvent):
+        """一键设置错误消息过滤"""
+        if not event.is_admin(): 
+            yield event.plain_result("抱歉，您没有权限。")
             return
         
-        current_status = self.config.get('enable_block_filter', False)
-        new_status = not current_status
-        self.config['enable_block_filter'] = new_status
-        self._save_plugin_config()
-        self._reload_config_from_self_dot_config()
-        yield event.plain_result(f"消息拦截功能已 {'开启' if new_status else '关闭'}。")
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("过滤配置", "词语过滤配置")
-    async def cmd_show_filter_config(self, event: AstrMessageEvent):
-        """[Admin] 显示当前所有过滤器配置及可用命令。"""
-        if not event.is_admin():
-            yield event.plain_result("抱歉，您没有权限使用此命令。")
-            return
-        self._reload_config_from_self_dot_config() 
-
-        delete_enabled = "开启" if self.enable_delete_filter else "关闭"
-        delete_list_str = ", ".join(f"'{w}'" for w in self.delete_words_list) if self.delete_words_list else "空"
-        delete_case = "区分" if self.delete_case_sensitive else "不区分"
-        delete_whole = "是" if self.delete_match_whole_word else "否"
-
-        block_enabled = "开启" if self.enable_block_filter else "关闭"
-        block_list_str = ", ".join(f"'{w}'" for w in self.block_words_list) if self.block_words_list else "空"
-        block_case = "区分" if self.block_case_sensitive else "不区分"
-        block_whole = "是" if self.block_match_whole_word else "否"
-        block_resp = f"'{self.block_response_message}'" if self.block_response_message else "无 (清空消息)"
-
-        reply_message = f"""--- 过滤器当前配置 ({self.plugin_id}) ---
-删除功能: {delete_enabled}
-  - 删除列表: {delete_list_str}
-  - 大小写敏感: {delete_case}
-  - 仅匹配整个词: {delete_whole}
-
-拦截功能: {block_enabled}
-  - 拦截列表: {block_list_str}
-  - 大小写敏感: {block_case}
-  - 仅匹配整个词: {block_whole}
-  - 拦截后回复: {block_resp}
-
---- 可用管理命令 ---
-  /加删除词 <词语>   - 添加词到删除列表
-  /减删除词 <词语>   - 从删除列表移除词
-  /切换删除          - 开/关删除功能
-
-  /加拦截词 <词语>   - 添加词到拦截列表
-  /减拦截词 <词语>   - 从拦截列表移除词
-  /切换拦截          - 开/关拦截功能
-  
-
------------------------------------"""
-        yield event.plain_result(reply_message)
+        # 自动开启过滤器
+        self.config['enable_final_filter'] = True
+        # 添加错误关键词
+        error_keywords = ['请求失败', '错误类型', '错误信息', 'Exception', 'Error', 'Traceback']
+        
+        # 添加常见的错误关键词
+        final_block_words = self.config.get('final_block_words', [])
+        
+        added_words = []
+        for keyword in error_keywords:
+            if keyword not in final_block_words:
+                final_block_words.append(keyword)
+                added_words.append(keyword)
+        
+        self.config['final_block_words'] = final_block_words
+        
+        # 清空拦截回复（直接隐藏错误消息）
+        self.config['final_block_response'] = ''
+        
+        # 保存并重载配置
+        self._save_config()
+        self._reload_config()
+        
+        result_text = "✅ 错误消息过滤已一键设置完成！\n\n"
+        result_text += "已开启: 🛡️ 最终输出过滤器\n"
+        result_text += f"已添加拦截词: {added_words if added_words else '无新增（已存在）'}\n"
+        result_text += "拦截方式: 直接隐藏错误消息\n\n"
+        result_text += "现在用户将看不到API错误信息了！\n"
+        result_text += "发送 /过滤配置 查看详细设置"
+        
+        yield event.plain_result(result_text)
