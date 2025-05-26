@@ -14,6 +14,14 @@ class CustomWordFilter(Star):
         super().__init__(context)
         self.plugin_id = "astrbot_plugin_delete_and_block_filter"
         self.config = config
+        
+        # 获取插件数据目录（按照AstrBot推荐方式）
+        try:
+            from astrbot.api.star import StarTools
+            self.data_dir = StarTools.get_data_dir(self.plugin_id)
+        except ImportError:
+            # 兼容旧版本
+            self.data_dir = None
 
         logger.info(f"[{self.plugin_id}] 插件已载入 (v2.0.0)")
         try:
@@ -79,20 +87,85 @@ class CustomWordFilter(Star):
         logger.info(f"[{self.plugin_id}] 配置已重载")
 
     def _build_regex(self, words: list, case_sensitive: bool = False, match_whole_word: bool = False) -> str:
-        """构建正则表达式"""
+        """构建正则表达式，支持特殊模式"""
         if not words:
             return ""
         
-        # 过滤空词并转义特殊字符
-        processed_words = [re.escape(str(word).strip()) for word in words if str(word).strip()]
-        if not processed_words:
-            return ""
+        patterns = []
+        for word in words:
+            word_str = str(word).strip()
+            if not word_str:
+                continue
+                
+            # 检查是否是特殊模式（如 &&...&&）
+            if self._is_special_pattern(word_str):
+                # 处理特殊模式
+                pattern = self._convert_special_pattern(word_str)
+                patterns.append(pattern)
+            else:
+                # 处理普通词语
+                escaped_word = re.escape(word_str)
+                if match_whole_word:
+                    escaped_word = r'\b' + escaped_word + r'\b'
+                patterns.append(escaped_word)
         
-        # 如果需要匹配整个单词，添加单词边界
-        if match_whole_word:
-            processed_words = [r'\b' + word + r'\b' for word in processed_words]
+        if not patterns:
+            return ""
             
-        return "|".join(processed_words)
+        return "|".join(patterns)
+
+    def _is_special_pattern(self, word: str) -> bool:
+        """检查是否是特殊模式"""
+        # 检查是否包含特殊字符组合
+        special_chars = ['&&', '**', '##', '@@', '%%', '$$']
+        for chars in special_chars:
+            if chars in word:
+                return True
+        return False
+
+    def _convert_special_pattern(self, word: str) -> str:
+        """将特殊模式转换为正则表达式"""
+        # 处理 &&...&& 模式
+        if '&&' in word:
+            # 如果是 &&具体内容&&，就精确匹配
+            # 如果是 &&&&（空内容），就匹配任意 &&...&& 格式
+            if word == '&&&&':
+                return r'&&[^&]*&&'
+            else:
+                # 精确匹配指定内容
+                return re.escape(word)
+        
+        # 处理其他特殊字符模式
+        special_patterns = {
+            '**': r'\*\*[^*]*\*\*',
+            '##': r'##[^#]*##',
+            '@@': r'@@[^@]*@@',
+            '%%': r'%%[^%]*%%',
+            '$$': r'\$\$[^$]*\$\$'
+        }
+        
+        for chars, pattern in special_patterns.items():
+            if chars in word:
+                if word == chars + chars:  # 如果是 ****（空内容）
+                    return pattern
+                else:
+                    # 精确匹配指定内容
+                    return re.escape(word)
+        
+        return re.escape(word)
+
+    def _clean_special_chars(self, text: str) -> str:
+        """清理特殊字符，如 &&shy&&、&&nbsp&& 等"""
+        if not text:
+            return text
+        
+        # 匹配 &&...&& 格式的特殊字符
+        # 这个正则会匹配 && 开头和结尾，中间包含任意非&字符的模式
+        # [^&]* 表示匹配任意数量的非&字符
+        pattern = r'&&[^&]*&&'
+        cleaned_text = re.sub(pattern, '', text)
+        
+        return cleaned_text
 
     @filter.on_llm_response()
     async def filter_llm_response(self, event: AstrMessageEvent, response: LLMResponse):
@@ -111,7 +184,7 @@ class CustomWordFilter(Star):
             if pattern and re.search(pattern, modified_text, flags):
                 # 找出具体触发的词
                 triggered_words = [word for word in self.llm_block_words 
-                                 if re.search(re.escape(word), modified_text, flags)]
+                                 if re.search(self._build_regex([word], self.llm_block_case_sensitive, self.llm_block_match_whole_word), modified_text, flags)]
                 
                 if self.llm_block_response:
                     modified_text = self.llm_block_response
@@ -125,13 +198,11 @@ class CustomWordFilter(Star):
                 # 输出合并的日志
                 if self.show_console_log and triggered_actions:
                     logger.info(f"[{self.plugin_id}] LLM过滤结果: {' | '.join(triggered_actions)}")
-                    
-                    # 确保原文显示正常 - 一定会执行
                     logger.info(f"[{self.plugin_id}] 原文: '{original_text}'")
                 
                 return
 
-        # 删除功能
+        # 删除功能（支持特殊模式）
         if self.llm_delete_words:
             pattern = self._build_regex(self.llm_delete_words, self.llm_delete_case_sensitive, self.llm_delete_match_whole_word)
             flags = 0 if self.llm_delete_case_sensitive else re.IGNORECASE
@@ -139,8 +210,12 @@ class CustomWordFilter(Star):
                 new_text = re.sub(pattern, "", modified_text, flags=flags)
                 if new_text != modified_text:
                     # 找出具体删除的词
-                    triggered_words = [word for word in self.llm_delete_words 
-                                     if re.search(re.escape(word), modified_text, flags)]
+                    triggered_words = []
+                    for word in self.llm_delete_words:
+                        word_pattern = self._build_regex([word], self.llm_delete_case_sensitive, self.llm_delete_match_whole_word)
+                        if re.search(word_pattern, modified_text, flags):
+                            triggered_words.append(word)
+                    
                     triggered_actions.append(f"删除敏感词(触发词: {triggered_words})")
                     response.completion_text = new_text
                     modified_text = new_text  # 更新修改后的文本
@@ -148,7 +223,6 @@ class CustomWordFilter(Star):
         # 输出合并的日志（只在有操作时输出）
         if self.show_console_log and triggered_actions:
             logger.info(f"[{self.plugin_id}] LLM过滤结果: {' | '.join(triggered_actions)}")
-            # 原文显示 - 简化处理确保一定执行
             logger.info(f"[{self.plugin_id}] 原文: '{original_text}'")
             # 如果有修改才显示结果
             if modified_text != original_text:
@@ -188,8 +262,11 @@ class CustomWordFilter(Star):
             flags = 0 if self.final_block_case_sensitive else re.IGNORECASE
             if pattern and re.search(pattern, original_text, flags):
                 # 找出具体触发的词
-                triggered_words = [word for word in self.final_block_words 
-                                 if re.search(re.escape(word), original_text, flags)]
+                triggered_words = []
+                for word in self.final_block_words:
+                    word_pattern = self._build_regex([word], self.final_block_case_sensitive, self.final_block_match_whole_word)
+                    if re.search(word_pattern, original_text, flags):
+                        triggered_words.append(word)
                 
                 if self.final_block_response:
                     # 替换为自定义回复
@@ -204,12 +281,11 @@ class CustomWordFilter(Star):
                 # 输出合并的日志
                 if self.show_console_log and triggered_actions:
                     logger.info(f"[{self.plugin_id}] 最终输出过滤结果: {' | '.join(triggered_actions)}")
-                    # 确保原文显示正常
                     logger.info(f"[{self.plugin_id}] 原文: '{original_text}'")
                 
                 return
 
-        # 删除功能
+        # 删除功能（支持特殊模式）
         if self.final_delete_words:
             pattern = self._build_regex(self.final_delete_words, self.final_delete_case_sensitive, self.final_delete_match_whole_word)
             flags = 0 if self.final_delete_case_sensitive else re.IGNORECASE
@@ -232,8 +308,12 @@ class CustomWordFilter(Star):
                 
                 if text_changed:
                     # 找出具体删除的词
-                    triggered_words = [word for word in self.final_delete_words 
-                                     if re.search(re.escape(word), original_text, flags)]
+                    triggered_words = []
+                    for word in self.final_delete_words:
+                        word_pattern = self._build_regex([word], self.final_delete_case_sensitive, self.final_delete_match_whole_word)
+                        if re.search(word_pattern, original_text, flags):
+                            triggered_words.append(word)
+                    
                     triggered_actions.append(f"删除敏感词(触发词: {triggered_words})")
                     result.chain = new_chain
         
@@ -241,7 +321,6 @@ class CustomWordFilter(Star):
         if self.show_console_log and triggered_actions:
             final_text = self._get_text_from_result(result)
             logger.info(f"[{self.plugin_id}] 最终输出过滤结果: {' | '.join(triggered_actions)}")
-            # 确保原文显示正常
             logger.info(f"[{self.plugin_id}] 原文: '{original_text}'")
             
             if final_text != original_text:
@@ -270,6 +349,7 @@ class CustomWordFilter(Star):
   • 删除词: {self.llm_delete_words if self.llm_delete_words else '无'}
     - 区分大小写: {'是' if self.llm_delete_case_sensitive else '否'}
     - 完全匹配: {'是' if self.llm_delete_match_whole_word else '否 (推荐)'}
+    - 支持特殊模式: 如 &&123&& 删除所有 &&...&& 格式
   • 拦截词: {self.llm_block_words if self.llm_block_words else '无'}
     - 区分大小写: {'是' if self.llm_block_case_sensitive else '否'}
     - 完全匹配: {'是' if self.llm_block_match_whole_word else '否 (推荐)'}
@@ -279,6 +359,7 @@ class CustomWordFilter(Star):
   • 删除词: {self.final_delete_words if self.final_delete_words else '无'}
     - 区分大小写: {'是' if self.final_delete_case_sensitive else '否'}
     - 完全匹配: {'是' if self.final_delete_match_whole_word else '否 (推荐)'}
+    - 支持特殊模式: 如 &&123&& 删除所有 &&...&& 格式
   • 拦截词: {self.final_block_words if self.final_block_words else '无'}
     - 区分大小写: {'是' if self.final_block_case_sensitive else '否'}
     - 完全匹配: {'是' if self.final_block_match_whole_word else '否 (推荐)'}
@@ -292,6 +373,13 @@ class CustomWordFilter(Star):
 2. /加总输出拦截词 请求失败
 3. /加总输出拦截词 错误类型  
 4. /加总输出拦截词 错误信息
+
+=== 🎯 特殊模式使用说明 ===
+删除词支持特殊模式，可以删除特定格式的内容：
+• 普通词语: 输入 '鱼' 删除所有 '鱼' 字
+• 特殊格式: 输入 '&&123&&' 删除所有 &&...&& 格式内容
+• 支持格式: &&...&&, **...**, ##...##, @@...@@, %%...%%, $$...$$
+• 示例: 添加删除词 '&&shy&&' 会删除 &&shy&&、&&nbsp&& 等
 
 === 所有管理命令 ===
 开关控制:
@@ -308,6 +396,9 @@ LLM回复管理:
   /加总输出删除词 <词语>  /减总输出删除词 <词语>
   /加总输出拦截词 <词语>  /减总输出拦截词 <词语>
   /设置总输出拦截回复 <内容>
+
+测试功能:
+  /测试删除词 <测试文本>
 
 💡 高级配置请在网页管理界面调整区分大小写和完全匹配选项"""
 
@@ -564,5 +655,53 @@ LLM回复管理:
         result_text += "拦截方式: 直接隐藏错误消息\n\n"
         result_text += "现在用户将看不到API错误信息了！\n"
         result_text += "发送 /过滤配置 查看详细设置"
+        
+        yield event.plain_result(result_text)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("测试删除词")
+    async def cmd_test_delete_word(self, event: AstrMessageEvent, *, test_text: str = ""):
+        """测试删除词功能"""
+        if not event.is_admin(): 
+            yield event.plain_result("抱歉，您没有权限。")
+            return
+        
+        if not test_text:
+            yield event.plain_result("请提供测试文本，格式：/测试删除词 测试文本内容")
+            return
+        
+        # 测试LLM删除词
+        llm_result = test_text
+        if self.llm_delete_words:
+            pattern = self._build_regex(self.llm_delete_words, self.llm_delete_case_sensitive, self.llm_delete_match_whole_word)
+            flags = 0 if self.llm_delete_case_sensitive else re.IGNORECASE
+            if pattern:
+                llm_result = re.sub(pattern, "", test_text, flags=flags)
+        
+        # 测试最终输出删除词
+        final_result = test_text
+        if self.final_delete_words:
+            pattern = self._build_regex(self.final_delete_words, self.final_delete_case_sensitive, self.final_delete_match_whole_word)
+            flags = 0 if self.final_delete_case_sensitive else re.IGNORECASE
+            if pattern:
+                final_result = re.sub(pattern, "", test_text, flags=flags)
+        
+        result_text = f"""=== 删除词测试结果 ===
+
+📝 原始文本: '{test_text}'
+
+🤖 LLM删除词处理:
+  • 删除词列表: {self.llm_delete_words if self.llm_delete_words else '无'}
+  • 处理结果: '{llm_result}'
+  • 是否改变: {'是' if llm_result != test_text else '否'}
+
+🛡️ 最终输出删除词处理:
+  • 删除词列表: {self.final_delete_words if self.final_delete_words else '无'}
+  • 处理结果: '{final_result}'
+  • 是否改变: {'是' if final_result != test_text else '否'}
+
+💡 特殊模式示例:
+  • 添加删除词 '&&&&' 可删除所有 &&...&& 格式
+  • 添加删除词 '&&shy&&' 只删除具体的 &&shy&&"""
         
         yield event.plain_result(result_text)
