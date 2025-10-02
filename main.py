@@ -117,7 +117,8 @@ class CustomWordFilter(Star):
     def _is_special_pattern(self, word: str) -> bool:
         """检查是否是特殊模式"""
         # 检查是否包含特殊字符组合
-        special_chars = ['&&', '**', '##', '@@', '%%', '$$']
+        # 新增 '<guifan>' 和 '<!--' 作为特殊模式的触发点
+        special_chars = ['&&', '**', '##', '@@', '%%', '$$', '<guifan>', '<!--']
         for chars in special_chars:
             if chars in word:
                 return True
@@ -125,7 +126,30 @@ class CustomWordFilter(Star):
 
     def _convert_special_pattern(self, word: str) -> str:
         """将特殊模式转换为正则表达式"""
-        # 处理 &&...&& 模式
+        
+        # 1. 处理新增的复杂结构模式 (使用起始符作为通配符触发词)
+        
+        # 处理 <guifan>...</guifan> 模式
+        if '<guifan>' in word:
+            # 约定：如果用户输入的词语是 '<guifan>'，则匹配所有 <guifan>...</guifan> 结构
+            if word == '<guifan>':
+                # 非贪婪匹配，匹配起始标签到结束标签之间的所有内容
+                return r'<guifan>.*?</guifan>'
+            else:
+                # 否则，精确匹配输入的文本 (如 <guifan>123</guifan>)
+                return re.escape(word)
+                
+        # 处理 <!--...--> 模式
+        if '<!--' in word:
+            # 约定：如果用户输入的词语是 '<!--'，则匹配所有 <!--...--> 注释结构
+            if word == '<!--':
+                # 非贪婪匹配，匹配注释标签之间的所有内容
+                return r'<!--.*?-->'
+            else:
+                # 否则，精确匹配输入的文本 (如 <!--123-->)
+                return re.escape(word)
+        
+        # 2. 处理 &&...&& 模式 (原逻辑)
         if '&&' in word:
             # 如果是 &&具体内容&&，就精确匹配
             # 如果是 &&&&（空内容），就匹配任意 &&...&& 格式
@@ -135,7 +159,7 @@ class CustomWordFilter(Star):
                 # 精确匹配指定内容
                 return re.escape(word)
         
-        # 处理其他特殊字符模式
+        # 3. 处理其他特殊字符模式 (原逻辑)
         special_patterns = {
             '**': r'\*\*[^*]*\*\*',
             '##': r'##[^#]*##',
@@ -377,9 +401,10 @@ class CustomWordFilter(Star):
 === 🎯 特殊模式使用说明 ===
 删除词支持特殊模式，可以删除特定格式的内容：
 • 普通词语: 输入 '鱼' 删除所有 '鱼' 字
-• 特殊格式: 输入 '&&123&&' 删除所有 &&...&& 格式内容
-• 支持格式: &&...&&, **...**, ##...##, @@...@@, %%...%%, $$...$$
-• 示例: 添加删除词 '&&shy&&' 会删除 &&shy&&、&&nbsp&& 等
+• 复杂格式: 输入 '<guifan>' 删除所有 <guifan>...</guifan> 结构
+• 注释格式: 输入 '<!--' 删除所有 <!--...--> 注释结构
+• 支持格式: &&...&&, **...**, ##...##, @@...@@, %%...%%, $$...$$, <guifan>...</guifan>, <!--...-->
+• 示例: 添加删除词 '<guifan>' 会删除回复中的 <guifan>123</guifan>、<guifan>abc</guifan> 等所有该结构的内容
 
 === 所有管理命令 ===
 开关控制:
@@ -702,6 +727,7 @@ LLM回复管理:
 
 💡 特殊模式示例:
   • 添加删除词 '&&&&' 可删除所有 &&...&& 格式
-  • 添加删除词 '&&shy&&' 只删除具体的 &&shy&&"""
+  • 添加删除词 '<guifan>' 可删除所有 <guifan>...</guifan> 结构
+  • 添加删除词 '<!--' 可删除所有 <!--...--> 注释结构"""
         
         yield event.plain_result(result_text)
