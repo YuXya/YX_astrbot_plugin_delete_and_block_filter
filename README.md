@@ -1,4 +1,4 @@
-# 🛡️ AstrBot 词语过滤器插件 (astrbot_plugin_delete_and_block_filter)
+# 🛡️词语过滤器插件测试 (astrbot_plugin_delete_and_block_filter)
 
 **版本：** v2.0.0  
 **作者：** enixi  
