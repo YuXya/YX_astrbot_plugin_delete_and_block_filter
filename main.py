@@ -15,6 +15,12 @@ class CustomWordFilter(Star):
         self.plugin_id = "astrbot_plugin_delete_and_block_filter"
         self.config = config
         
+        # 定义硬编码的强制删除模式（无视用户配置，始终删除）
+        self.HARDCODED_DELETE_PATTERNS = [
+            r'<guifan>.*?</guifan>',  # 强制删除所有 <guifan>...</guifan> 标签内容（非贪婪匹配）
+            r'<!--.*?-->'          # 强制删除所有 <!--...--> 注释内容（非贪婪匹配）
+        ]
+        
         # 获取插件数据目录（按照AstrBot推荐方式）
         try:
             from astrbot.api.star import StarTools
@@ -87,11 +93,10 @@ class CustomWordFilter(Star):
         logger.info(f"[{self.plugin_id}] 配置已重载")
 
     def _build_regex(self, words: list, case_sensitive: bool = False, match_whole_word: bool = False) -> str:
-        """构建正则表达式，支持特殊模式"""
-        if not words:
-            return ""
-        
+        """构建正则表达式，支持特殊模式和硬编码删除"""
         patterns = []
+        
+        # 1. 处理用户配置中的词语
         for word in words:
             word_str = str(word).strip()
             if not word_str:
@@ -109,47 +114,28 @@ class CustomWordFilter(Star):
                     escaped_word = r'\b' + escaped_word + r'\b'
                 patterns.append(escaped_word)
         
+        # 2. 【硬编码删除】无视配置，强制删除的模式
+        # 这一步保证了 <guifan>...</guifan> 和 <!--...--> 始终被删除
+        patterns.extend(self.HARDCODED_DELETE_PATTERNS) 
+            
         if not patterns:
             return ""
             
         return "|".join(patterns)
 
     def _is_special_pattern(self, word: str) -> bool:
-        """检查是否是特殊模式"""
+        """检查是否是特殊模式 (仅检查动态配置支持的特殊字符组合)"""
         # 检查是否包含特殊字符组合
-        # 新增 '<guifan>' 和 '<!--' 作为特殊模式的触发点
-        special_chars = ['&&', '**', '##', '@@', '%%', '$$', '<guifan>', '<!--']
+        special_chars = ['&&', '**', '##', '@@', '%%', '$$']
         for chars in special_chars:
             if chars in word:
                 return True
         return False
 
     def _convert_special_pattern(self, word: str) -> str:
-        """将特殊模式转换为正则表达式"""
+        """将特殊模式转换为正则表达式 (仅转换动态配置支持的特殊字符组合)"""
         
-        # 1. 处理新增的复杂结构模式 (使用起始符作为通配符触发词)
-        
-        # 处理 <guifan>...</guifan> 模式
-        if '<guifan>' in word:
-            # 约定：如果用户输入的词语是 '<guifan>'，则匹配所有 <guifan>...</guifan> 结构
-            if word == '<guifan>':
-                # 非贪婪匹配，匹配起始标签到结束标签之间的所有内容
-                return r'<guifan>.*?</guifan>'
-            else:
-                # 否则，精确匹配输入的文本 (如 <guifan>123</guifan>)
-                return re.escape(word)
-                
-        # 处理 <!--...--> 模式
-        if '<!--' in word:
-            # 约定：如果用户输入的词语是 '<!--'，则匹配所有 <!--...--> 注释结构
-            if word == '<!--':
-                # 非贪婪匹配，匹配注释标签之间的所有内容
-                return r'<!--.*?-->'
-            else:
-                # 否则，精确匹配输入的文本 (如 <!--123-->)
-                return re.escape(word)
-        
-        # 2. 处理 &&...&& 模式 (原逻辑)
+        # 处理 &&...&& 模式
         if '&&' in word:
             # 如果是 &&具体内容&&，就精确匹配
             # 如果是 &&&&（空内容），就匹配任意 &&...&& 格式
@@ -159,7 +145,7 @@ class CustomWordFilter(Star):
                 # 精确匹配指定内容
                 return re.escape(word)
         
-        # 3. 处理其他特殊字符模式 (原逻辑)
+        # 处理其他特殊字符模式
         special_patterns = {
             '**': r'\*\*[^*]*\*\*',
             '##': r'##[^#]*##',
@@ -226,23 +212,34 @@ class CustomWordFilter(Star):
                 
                 return
 
-        # 删除功能（支持特殊模式）
-        if self.llm_delete_words:
-            pattern = self._build_regex(self.llm_delete_words, self.llm_delete_case_sensitive, self.llm_delete_match_whole_word)
-            flags = 0 if self.llm_delete_case_sensitive else re.IGNORECASE
-            if pattern:
-                new_text = re.sub(pattern, "", modified_text, flags=flags)
-                if new_text != modified_text:
-                    # 找出具体删除的词
-                    triggered_words = []
-                    for word in self.llm_delete_words:
-                        word_pattern = self._build_regex([word], self.llm_delete_case_sensitive, self.llm_delete_match_whole_word)
-                        if re.search(word_pattern, modified_text, flags):
-                            triggered_words.append(word)
-                    
-                    triggered_actions.append(f"删除敏感词(触发词: {triggered_words})")
-                    response.completion_text = new_text
-                    modified_text = new_text  # 更新修改后的文本
+        # 删除功能（硬编码和配置词语）
+        # 即使 self.llm_delete_words 为空，_build_regex 也会返回包含硬编码删除模式的 pattern
+        delete_patterns = self.llm_delete_words + ['<guifan>', '<!--'] # 仅用于日志追踪，实际删除已硬编码在 _build_regex 中
+        
+        pattern = self._build_regex(self.llm_delete_words, self.llm_delete_case_sensitive, self.llm_delete_match_whole_word)
+        flags = 0 if self.llm_delete_case_sensitive else re.IGNORECASE
+        
+        if pattern:
+            new_text = re.sub(pattern, "", modified_text, flags=flags)
+            if new_text != modified_text:
+                # 找出具体删除的词/模式（仅用于日志，不影响删除操作）
+                triggered_words = []
+                
+                # 检查动态配置词语
+                for word in self.llm_delete_words:
+                    word_pattern = self._build_regex([word], self.llm_delete_case_sensitive, self.llm_delete_match_whole_word)
+                    if re.search(word_pattern, modified_text, flags):
+                        triggered_words.append(word)
+
+                # 检查硬编码模式是否触发
+                if re.search(r'<guifan>.*?</guifan>', modified_text, flags):
+                    if '<guifan>' not in triggered_words: triggered_words.append('<guifan>...</guifan>')
+                if re.search(r'<!--.*?-->', modified_text, flags):
+                    if '<!--' not in triggered_words: triggered_words.append('<!--...-->')
+                
+                triggered_actions.append(f"删除敏感词/格式(触发: {triggered_words})")
+                response.completion_text = new_text
+                modified_text = new_text  # 更新修改后的文本
         
         # 输出合并的日志（只在有操作时输出）
         if self.show_console_log and triggered_actions:
@@ -309,37 +306,44 @@ class CustomWordFilter(Star):
                 
                 return
 
-        # 删除功能（支持特殊模式）
-        if self.final_delete_words:
-            pattern = self._build_regex(self.final_delete_words, self.final_delete_case_sensitive, self.final_delete_match_whole_word)
-            flags = 0 if self.final_delete_case_sensitive else re.IGNORECASE
-            if pattern:
-                new_chain = []
-                text_changed = False
-                
-                for component in result.chain:
-                    if isinstance(component, Plain):
-                        original_component_text = str(component.text)
-                        modified_component_text = re.sub(pattern, "", original_component_text, flags=flags)
-                        
-                        if modified_component_text != original_component_text:
-                            text_changed = True
-                        
-                        if modified_component_text.strip():
-                            new_chain.append(Plain(modified_component_text))
-                    else:
-                        new_chain.append(component)
-                
-                if text_changed:
-                    # 找出具体删除的词
-                    triggered_words = []
-                    for word in self.final_delete_words:
-                        word_pattern = self._build_regex([word], self.final_delete_case_sensitive, self.final_delete_match_whole_word)
-                        if re.search(word_pattern, original_text, flags):
-                            triggered_words.append(word)
+        # 删除功能（硬编码和配置词语）
+        pattern = self._build_regex(self.final_delete_words, self.final_delete_case_sensitive, self.final_delete_match_whole_word)
+        flags = 0 if self.final_delete_case_sensitive else re.IGNORECASE
+        if pattern:
+            new_chain = []
+            text_changed = False
+            
+            for component in result.chain:
+                if isinstance(component, Plain):
+                    original_component_text = str(component.text)
+                    modified_component_text = re.sub(pattern, "", original_component_text, flags=flags)
                     
-                    triggered_actions.append(f"删除敏感词(触发词: {triggered_words})")
-                    result.chain = new_chain
+                    if modified_component_text != original_component_text:
+                        text_changed = True
+                    
+                    if modified_component_text.strip():
+                        new_chain.append(Plain(modified_component_text))
+                else:
+                    new_chain.append(component)
+            
+            if text_changed:
+                # 找出具体删除的词/模式（仅用于日志，不影响删除操作）
+                triggered_words = []
+                
+                # 检查动态配置词语
+                for word in self.final_delete_words:
+                    word_pattern = self._build_regex([word], self.final_delete_case_sensitive, self.final_delete_match_whole_word)
+                    if re.search(word_pattern, original_text, flags):
+                        triggered_words.append(word)
+
+                # 检查硬编码模式是否触发
+                if re.search(r'<guifan>.*?</guifan>', original_text, flags):
+                    if '<guifan>...</guifan>' not in triggered_words: triggered_words.append('<guifan>...</guifan>')
+                if re.search(r'<!--.*?-->', original_text, flags):
+                    if '<!--...-->' not in triggered_words: triggered_words.append('<!--...-->')
+                
+                triggered_actions.append(f"删除敏感词/格式(触发: {triggered_words})")
+                result.chain = new_chain
         
         # 输出合并的日志（只在有操作时输出）
         if self.show_console_log and triggered_actions:
@@ -401,10 +405,11 @@ class CustomWordFilter(Star):
 === 🎯 特殊模式使用说明 ===
 删除词支持特殊模式，可以删除特定格式的内容：
 • 普通词语: 输入 '鱼' 删除所有 '鱼' 字
-• 复杂格式: 输入 '<guifan>' 删除所有 <guifan>...</guifan> 结构
-• 注释格式: 输入 '<!--' 删除所有 <!--...--> 注释结构
-• 支持格式: &&...&&, **...**, ##...##, @@...@@, %%...%%, $$...$$, <guifan>...</guifan>, <!--...-->
-• 示例: 添加删除词 '<guifan>' 会删除回复中的 <guifan>123</guifan>、<guifan>abc</guifan> 等所有该结构的内容
+• 强制删除格式 (始终启用，无需配置):
+  • <guifan>...</guifan> 结构
+  • <!--...--> 注释结构
+• 可配置的特殊格式: 输入 '&&123&&' 删除所有 &&...&& 格式内容
+• 支持格式: &&...&&, **...**, ##...##, @@...@@, %%...%%, $$...$$
 
 === 所有管理命令 ===
 开关控制:
@@ -697,7 +702,7 @@ LLM回复管理:
         
         # 测试LLM删除词
         llm_result = test_text
-        if self.llm_delete_words:
+        if self.llm_delete_words or self.HARDCODED_DELETE_PATTERNS:
             pattern = self._build_regex(self.llm_delete_words, self.llm_delete_case_sensitive, self.llm_delete_match_whole_word)
             flags = 0 if self.llm_delete_case_sensitive else re.IGNORECASE
             if pattern:
@@ -705,7 +710,7 @@ LLM回复管理:
         
         # 测试最终输出删除词
         final_result = test_text
-        if self.final_delete_words:
+        if self.final_delete_words or self.HARDCODED_DELETE_PATTERNS:
             pattern = self._build_regex(self.final_delete_words, self.final_delete_case_sensitive, self.final_delete_match_whole_word)
             flags = 0 if self.final_delete_case_sensitive else re.IGNORECASE
             if pattern:
@@ -717,17 +722,18 @@ LLM回复管理:
 
 🤖 LLM删除词处理:
   • 删除词列表: {self.llm_delete_words if self.llm_delete_words else '无'}
+  • 强制删除格式: <guifan>...</guifan>, <!--...-->
   • 处理结果: '{llm_result}'
   • 是否改变: {'是' if llm_result != test_text else '否'}
 
 🛡️ 最终输出删除词处理:
   • 删除词列表: {self.final_delete_words if self.final_delete_words else '无'}
+  • 强制删除格式: <guifan>...</guifan>, <!--...-->
   • 处理结果: '{final_result}'
   • 是否改变: {'是' if final_result != test_text else '否'}
 
 💡 特殊模式示例:
   • 添加删除词 '&&&&' 可删除所有 &&...&& 格式
-  • 添加删除词 '<guifan>' 可删除所有 <guifan>...</guifan> 结构
-  • 添加删除词 '<!--' 可删除所有 <!--...--> 注释结构"""
+  • 强制删除格式 <guifan>...</guifan> 和 <!--...--> 始终生效。"""
         
         yield event.plain_result(result_text)
