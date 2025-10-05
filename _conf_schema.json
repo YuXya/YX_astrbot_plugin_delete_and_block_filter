@@ -2,7 +2,20 @@
     "enable_filter": {
         "type": "bool",
         "description": "🔌 插件总开关",
-        "hint": "开启后，将自动删除回复内容中的思考过程（<thinking>）和特定标签。",
+        "hint": "开启后，将自动删除回复内容中的指定标签和内容。",
         "default": true
+    },
+    "custom_delete_tags": {
+        "type": "list",
+        "description": "🗑️ 自定义删除关键字/标签",
+        "hint": "在这里添加需要从回复中完全删除的文本或标签。例如，添加 '<content>' 和 '</content>' 可以移除这两个标签。",
+        "default": [
+            "<content>",
+            "</content>"
+        ],
+        "items": {
+            "type": "string"
+        }
     }
 }
+
